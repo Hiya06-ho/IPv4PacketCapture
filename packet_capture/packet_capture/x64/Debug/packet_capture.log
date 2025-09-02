@@ -1,0 +1,5 @@
+﻿  prototype01.c
+C:\Users\wjsdp\OneDrive\바탕 화면\project\packet_capture\packet_capture\prototype01.c(83,2): warning C4996: 'scanf': This function or variable may be unsafe. Consider using scanf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+C:\Users\wjsdp\OneDrive\바탕 화면\project\packet_capture\packet_capture\prototype01.c(157,30): warning C4996: 'inet_ntoa': Use inet_ntop() or InetNtop() instead or define _WINSOCK_DEPRECATED_NO_WARNINGS to disable deprecated API warnings
+C:\Users\wjsdp\OneDrive\바탕 화면\project\packet_capture\packet_capture\prototype01.c(158,32): warning C4996: 'inet_ntoa': Use inet_ntop() or InetNtop() instead or define _WINSOCK_DEPRECATED_NO_WARNINGS to disable deprecated API warnings
+  packet_capture.vcxproj -> C:\Users\wjsdp\OneDrive\바탕 화면\project\packet_capture\x64\Debug\packet_capture.exe
