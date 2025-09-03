@@ -1,174 +1,187 @@
-//Çì´õÆÄÀÏ ¶óÀÌºê·¯¸® 
 #include <stdio.h>
 #include <pcap.h>
 #include <winsock2.h>
 #include <windows.h>
 #include <stdint.h>
+#include <ctype.h>
 
-//MACÁÖ¼Ò Ãâ·Â ¸ÅÅ©·Î
+void init_winsock();
+pcap_t* open_capture_handle(const char* dev, char* errbuf, pcap_t* handle);
+pcap_if_t* choose_device(pcap_if_t* alldevs, pcap_if_t* d, pcap_t* handle, char errbuf[PCAP_ERRBUF_SIZE], int choice);
+void analyze_ipv4_packet(const u_char* pkt_data, struct pcap_pkthdr* header, struct eth_header* eth);
+void capture_loop(pcap_t* handle, u_char* pkt_data, int re, struct pcap_pkthdr* header);
+void print_hex_ascii(const u_char* payload, int len);
+
 #define MAC_ADDR_FMT "%02X:%02X:%02X:%02X:%02X:%02X"
 #define MAC_ADDR_FMT_ARGS(addr) addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]
 
-//ÆĞÅ¶À» ºĞ¼®ÇÏ±â À§ÇÑ ±¸Á¶Ã¼ : Çì´õ ±¸Á¶·Î Á¦ÀÛ
 struct ip_header {
-	unsigned char  protocol;   // ÇÁ·ÎÅäÄİ
-	unsigned int   saddr;      // Ãâ¹ßÁö IP
-	unsigned int   daddr;      // ¸ñÀûÁö IP
+	unsigned char  protocol;
+	unsigned int   saddr;
+	unsigned int   daddr;
 };
 
 struct eth_header {
-	//dest¿Í src´Â ¸ñÀûÁö ¸Æ, Ãâ¹ßÁö ¸Æ
 	unsigned char dest[6];
 	unsigned char src[6];
 	unsigned short type;
 };
 
-//¸ŞÀÎ ½ÃÀÛ
 int main(void)
 {
-	/*
-	¼ÒÄÏ ÇÔ¼ö¸¦ È£ÃâÇÏ±â Àü¿¡ ¿ø¼Ò ÃÊ±âÈ­ÇÏ´Â ÇÔ¼ö
-	inet_ntoa()¿Í °°Àº ipÁÖ¼Ò º¯È¯ ÇÔ¼ö¸¦ »ç¿ëÇÏ±â À§ÇØ ¼ÒÄÏÇÔ¼ö »ç¿ë
-	*/
-	WSADATA wsaData;
+	init_winsock();
 
-	//ÃÊ±âÈ­ È®ÀÎ
-	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-		printf("Winsock ÃÊ±âÈ­ ½ÇÆĞ\n");
-		return 1;
-	}
-
-	//pcap_if_t : ³×Æ®¿öÅ© ÀåÄ¡ Á¤º¸¸¦ ´ã´Â ±¸Á¶Ã¼(Çì´õÆÄÀÏ·Î ¼±¾ğ)
 	pcap_if_t* alldevs;
 	pcap_if_t* d;
 	pcap_t* handle;
-	
-	//¿¡·¯¸¦ ´ãÀ» ¹öÆÛ ¸Ş¸ğ¸®
 	char errbuf[PCAP_ERRBUF_SIZE];
-
-	//³×Æ®¿öÅ© ÀåÄ¡ ¸ñ·Ï ¹øÈ£
 	int choice = 0;
 
+	const char* dev = choose_device(&alldevs, &d, &handle, errbuf, choice);
+
+	handle = open_capture_handle(dev, errbuf, handle);
+
+	WSACleanup();
+
+	return 0;
+}
+
+void init_winsock()
+{
+	WSADATA wsaData;
+	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+		printf("Winsock ì´ˆê¸°í™” ì‹¤íŒ¨\n");
+	}
+}
+
+pcap_t* open_capture_handle(const char* dev, char* errbuf, pcap_t* handle)
+{
+	struct pcap_pkthdr* header;
+	const u_char* pkt_data;
+	int re = 0;
+
+	handle = pcap_open_live(dev, 65535, 1, 1000, errbuf);
+
+	if (handle == NULL)
+	{
+		printf("      íŒ¨í‚· ìº¡ì³ ì‹¤íŒ¨\n");
+		return NULL;
+	}
+
+	while (1)
+		capture_loop(handle, &pkt_data, re, &header);
+
+	pcap_close(handle);
+}
+
+void capture_loop(pcap_t* handle, u_char* pkt_data, int re, struct pcap_pkthdr* header)
+{
+	printf("\n--------------------------------------------------------------------\n\n");
+	re = pcap_next_ex(handle, &header, &pkt_data);
+	if (re == 0)
+		return 0;
+
+	struct eth_header* eth = (struct eth_header*)pkt_data;
+	if (ntohs(eth->type) == 0x0800)
+		analyze_ipv4_packet(pkt_data, header, eth);
+	else if (ntohs(eth->type) == 0x0806)
+		printf("ARP íŒ¨í‚·ì…ë‹ˆë‹¤.\n");
+	else if (ntohs(eth->type) == 0x86DD)
+		printf("IPv6 íŒ¨í‚·ì…ë‹ˆë‹¤.\n");
+	else
+		printf("ì•Œ ìˆ˜ ì—†ëŠ” Ethernet íƒ€ì…: 0x%04X\n", ntohs(eth->type));
+
+	const u_char* packet = pkt_data;
+	int packet_len = header->len;
+	print_hex_ascii(packet, packet_len);
+}
+
+void analyze_ipv4_packet(const u_char* pkt_data, struct pcap_pkthdr* header, struct eth_header* eth)
+{
+	printf("IPv4 íŒ¨í‚· ê¸¸ì´: %d\n", header->len);
+
+	struct ip_header* ip = (struct ip_header*)(pkt_data + 14);
+
+	printf("ì¶œë°œì§€: %s\n", inet_ntoa(*(struct in_addr*)&ip->saddr));
+	printf("ëª©ì ì§€: %s\n\n", inet_ntoa(*(struct in_addr*)&ip->daddr));
+
+	printf("ì¶œë°œì§€ MACì£¼ì†Œ: "MAC_ADDR_FMT"\n", MAC_ADDR_FMT_ARGS(eth->src));
+	printf("ëª©ì ì§€ MACì£¼ì†Œ: "MAC_ADDR_FMT"\n", MAC_ADDR_FMT_ARGS(eth->dest));
+	printf("í”„ë¡œí† ì½œ: %d\n\n", ip->protocol);
+}
+
+pcap_if_t* choose_device(pcap_if_t* alldevs, pcap_if_t* d, pcap_t* handle, char errbuf[PCAP_ERRBUF_SIZE], int choice )
+{
 	printf("\n****************************************************************************\n\n");
 
-	//»ç¿ë°¡´ÉÇÑ ¸ğµç ³×Æ®¿öÅ© ÀåÄ¡ ¸ñ·ÏÀ» °¡Á®¿À°í ½ÇÆĞÇÏ¸é -1À» ¹İÈ¯
 	if (pcap_findalldevs(&alldevs, errbuf) == -1)
 	{
-		//½ÇÆĞÇÏ¸é ÀåÄ¡ °Ë»ö ½ÇÆĞ¸¦ Ãâ·Â
-		printf("ÀåÄ¡ °Ë»ö ½ÇÆĞ: %s\n", errbuf);
+		printf("ì¥ì¹˜ ê²€ìƒ‰ ì‹¤íŒ¨: %s\n", errbuf);
 		return 1;
 	}
 
-	//¹İº¹¹®¿ë
 	int i = 0;
-
-	//d°¡ NULLÀÌ µÉ ¶§±îÁö ´ÙÀ½À¸·Î ³Ñ±è
 	for (d = alldevs; d != NULL; d = d->next)
 	{
-		//¸î¹øÂ° ÀåÄ¡°¡ ¾î¶² ÀÌ¸§ÀÇ ³×Æ®¿öÅ© ÀåÄ¡ÀÎÁö Ãâ·Â
-		printf("      %d¹ø ÀåÄ¡: %s\n", ++i, d->name);
-
-		//³×Æ®¿öÅ© ÀåÄ¡ÀÇ ¼³¸íÀ» Ãâ·ÂÇÏ°Å³ª µÇÁö ¾ÊÀ¸¸é ¼³¸íÇÏÁö ¾Ê±â
+		printf("      %dë²ˆ ì¥ì¹˜: %s\n", ++i, d->name);
 		if (d->description)
-			printf("            ¼³¸í: %s\n\n", d->description);
+			printf("            ì„¤ëª…: %s\n\n", d->description);
 		else
-			printf("            ¼³¸í ¾øÀ½\n\n");
+			printf("            ì„¤ëª… ì—†ìŒ\n\n");
 	}
 
-	printf("\n****************************************************************************\n");    
-
-	//»ç¿ëÇÒ ÀåÄ¡ÀÇ ¹øÈ£¸¦ ÀÔ·Â¹Ş±â
-	printf("\n      ¾î¶² ÀåÄ¡¸¦ ¼±ÅÃÇÏ½Ã°Ú½À´Ï±î?: ");
+	printf("\n****************************************************************************\n");
+	printf("\n      ì–´ë–¤ ì¥ì¹˜ë¥¼ ì„ íƒí•˜ì‹œê² ìŠµë‹ˆê¹Œ?: ");
 	scanf("%d", &choice);
 
-	//dÀÇ ³×Æ®¿öÅ© ÀåÄ¡ Á¤º¸ ±¸Á¶Ã¼¸¦ Ã¹ ¹øÂ° À§Ä¡·Î ¿Å±è
 	d = alldevs;
-
-	//»ç¿ëÀÚ°¡ ¼±ÅÃÇÑ ¹øÈ£ choice¸¸Å­ ±¸Á¶Ã¼¸¦ ³Ñ±è
 	for (int j = 1; j < choice && d != NULL; j++)
 		d = d->next;
 
 	system("cls");
 
 	printf("\n****************************************************************************\n\n");
-
-	//¼±ÅÃµÈ ÀåÄ¡¸¦ Ãâ·ÂÇÔ
-	printf("      ¼±ÅÃµÈ ÀåÄ¡: %s\n", d->name);
-
+	printf("      ì„ íƒëœ ì¥ì¹˜: %s\n", d->name);
 	printf("\n****************************************************************************\n\n");
 
-	const char* dev = d->name;
-
-	//³×Æ®¿öÅ© ÀåÄ¡ ¸ñ·ÏÀ» °¡Á®¿À´Â ÇÔ¼ö¸¦ ´İÀ½
 	pcap_freealldevs(alldevs);
 
-	/*ÆĞÅ¶ Ä¸Ã³¸¦ ½ÃÀÛÇÏ´Â ÇÔ¼ö (±¸Á¶)
+	return d->name;
+}
 
-		pcap_t* pcap_open_live(
-			const char *device,  // Ä¸Ã³ÇÒ ³×Æ®¿öÅ© ÀåÄ¡ ÀÌ¸§
-			int snaplen,          // ÃÖ´ë Ä¸Ã³ ±æÀÌ (¹ÙÀÌÆ®)
-			int promisc,          // 1: promiscuous mode, 0: ÀÏ¹İ ¸ğµå
-			int to_ms,            // ÆĞÅ¶ Ä¸Ã³ ´ë±â ½Ã°£ (¹Ğ¸®ÃÊ)
-			char *errbuf          // ¿¡·¯ ¸Ş½ÃÁö ¹öÆÛ
-		);
+void print_hex_ascii(const u_char* payload, int len)
+{
+	int line_width = 16;
+	int offset = 0;
+	const u_char* ch = payload;
+	int cnt = 0;
+	int j = 0;
+	printf("data >> \n");
 
-	*/
-	handle = pcap_open_live(dev, 65535, 1, 1000, errbuf);
-
-	if (handle == NULL)
+	for (int i = 0; offset < len; offset += 16)
 	{
-		printf("      ÆĞÅ¶ Ä¸ÃÄ ½ÇÆĞ\n");
-		return 1;
-	}
-	
-	//ÆĞÅ¶ ¹İº¹ÇØ¼­ Ä¸Ã³
-	while (1)
-	{
-		/*
-		IPv4ÆĞÅ¶¸¸ ºĞ¼®ÇÒ°Çµ¥ Ethernet Å¸ÀÔ ºôµå°¡ 0x0800ÀÌ¸é IPv4ÆĞÅ¶ÀÓ
-		*/
+		if (offset != 0)
+			printf("00%d\t", offset);
 
-		//ÆĞÅ¶ Çì´õ ±¸Á¶Ã¼
-		struct pcap_pkthdr* header;
-		//ÆĞÅ¶ µ¥ÀÌÅÍ ±¸Á¶Ã¼
-		const u_char* pkt_data;
-
-		printf("\n--------------------------------------------------------------------\n\n");
-		//ÇÑ ÆĞÅ¶¾¿ Ã³¸®ÇÔ
-
-		//¸¸¾à ethernetÇì´õÀÇ typeÇÊµå µû¶ó¼­ ÆĞÅ¶ Á¾·ù¸¦ ¾Ë ¼ö ÀÖÀ½
-		struct eth_header* eth = (struct eth_header*)pkt_data;
-		if (ntohs(eth->type) == 0x0800)
+		for (; i < offset; i++)
 		{
-			//Çì´õ¿¡¼­ len±æÀÌ °¡Á®¿È
-			printf("IPv4 ÆĞÅ¶ ±æÀÌ: %d\n", header->len);
-
-			//ipv4´Â ÆĞÅ¶ÀÌ 14¹ÙÀÌÆ®?¶ó¼­ 14¸¦ ´õÇÔ
-			struct ip_header* ip = (struct ip_header*)(pkt_data + 14);
-
-			//±¸Á¶Ã¼¿¡¼­ °¡Á®¿Í¼­ Ãâ·Â
-			printf("Ãâ¹ßÁö: %s\n", inet_ntoa(*(struct in_addr*)&ip->saddr));
-			printf("¸ñÀûÁö: %s\n\n", inet_ntoa(*(struct in_addr*)&ip->daddr));
-
-			//¸ÆÁÖ¼Ò Ãâ·Â ¸ÅÅ©·Î·Î °£´ÜÇÏ°Ô Ãâ·Â
-			printf("Ãâ¹ßÁö MACÁÖ¼Ò: "MAC_ADDR_FMT"\n", MAC_ADDR_FMT_ARGS(eth->src));
-			printf("¸ñÀûÁö MACÁÖ¼Ò: "MAC_ADDR_FMT"\n", MAC_ADDR_FMT_ARGS(eth->dest));
-			printf("ÇÁ·ÎÅäÄİ: %d\n\n", ip->protocol);
+			printf("%02x ", ch[i]);
+			cnt++;
 		}
-		//¸¸¾à ´Ù¸¥ ÆĞÅ¶ÀÌ¸é ¾î¶² ÆĞÅ¶ÀÎÁö Ãâ·Â
-		else if(ntohs(eth->type) == 0x0806)
-			printf("ARP ÆĞÅ¶ÀÔ´Ï´Ù.\n");
-		else if (ntohs(eth->type) == 0x86DD)
-			printf("IPv6 ÆĞÅ¶ÀÔ´Ï´Ù.\n");
-		else 
-			printf("¾Ë ¼ö ¾ø´Â Ethernet Å¸ÀÔ: 0x%04X\n", ntohs(eth->type));
+
+		if ((i + 1) % 16 == 1)
+			printf("\t");
+
+		for (; j < offset; j++)
+		{
+			if (isprint(ch[j]) == 1)
+				printf("%c", ch[j]);
+			else
+				printf(".");
+		}
+
+		printf("\n");
+		if (cnt == 64)
+			break;
 	}
-
-	//ÆĞÅ¶ Ä¸Ã³ ÇÔ¼ö ´İ±â
-	pcap_close(handle);
-
-	//¼ÒÄÏ ÇÔ¼ö ´İ±â
-	WSACleanup();
-
-	return 0;
 }
