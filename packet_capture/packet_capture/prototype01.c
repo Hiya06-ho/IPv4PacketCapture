@@ -13,20 +13,20 @@ void print_hex_ascii(const u_char* payload, int len);
 void analyze_ARP_packet(struct eth_header* eth, const unsigned char* pkt_data);
 int choose_filter(int filter);
 
-#define MAC_ADDR_FMT "%02X:%02X:%02X:%02X:%02X:%02X"
+#define MAC_ADDR_FMT "%02X:%02X:%02X:%02X:%02X:%02X" 
 #define MAC_ADDR_FMT_ARGS(addr) addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]
 
 struct ip_header {
-	unsigned char version_ihl;
+	unsigned char version;
 	unsigned char tos;
 	unsigned short total_len;
 	unsigned short id;
 	unsigned short frag_off;
 	unsigned char ttl;
-	unsigned char  protocol;
+	unsigned char protocol;
 	unsigned short check;
-	unsigned int   saddr;
-	unsigned int   daddr;
+	unsigned int saddr;
+	unsigned int daddr;
 };
 
 struct eth_header {
@@ -40,8 +40,8 @@ struct arp_header {
 	unsigned short htype;
 	unsigned short ptype;
 	unsigned char hlen;
-	unsigned char plen;      
-	unsigned short opcode;   
+	unsigned char plen;
+	unsigned short opcode;
 	unsigned char sender_mac[6];
 	struct in_addr sender_ip;
 	unsigned char target_mac[6];
@@ -60,11 +60,10 @@ int main(void)
 	int choice = 0, filter = 0;
 
 	const char* dev = choose_device(&alldevs, &d, &handle, errbuf, choice);
-	
+
 	filter = choose_filter(filter);
 
 	handle = open_capture_handle(dev, errbuf, handle, filter);
-	
 
 	WSACleanup();
 
@@ -89,12 +88,12 @@ pcap_t* open_capture_handle(const char* dev, char* errbuf, pcap_t* handle, int f
 
 	if (handle == NULL)
 	{
-		printf("      패킷 캡쳐 실패\n");
+		printf("      패킷 캡처 실패\n");
 		return NULL;
 	}
 
 	capture_loop(handle, filter);
-	
+
 	pcap_close(handle);
 
 	return handle;
@@ -108,7 +107,6 @@ void capture_loop(pcap_t* handle, int filter)
 	while (1)
 	{
 		int re = pcap_next_ex(handle, &header, &pkt_data);
-		//PCAP_API int	pcap_next_ex(pcap_t *, struct pcap_pkthdr **, const u_char **);
 
 		if (re != 1)
 			continue;
@@ -117,7 +115,8 @@ void capture_loop(pcap_t* handle, int filter)
 		int packet_len = header->len;
 
 		struct eth_header* eth = (struct eth_header*)pkt_data;
-		if ( (filter == 1) && (ntohs(eth->type) == 0x0800))
+
+		if ((filter == 1) && (ntohs(eth->type) == 0x0800))
 		{
 			analyze_ipv4_packet(pkt_data, header, eth);
 			print_hex_ascii(packet, packet_len);
@@ -126,7 +125,6 @@ void capture_loop(pcap_t* handle, int filter)
 		if ((filter == 2) && (ntohs(eth->type) == 0x0806))
 		{
 			analyze_ARP_packet(eth, packet);
-
 		}
 	}
 }
@@ -135,32 +133,29 @@ void analyze_ARP_packet(struct eth_header* eth, const unsigned char* pkt_data)
 {
 	printf("\n--------------------------------------------------------------------\n\n");
 
-	//ARP출력은 출발지/목적지가 아닌 보낸이(Sender)와 대상(Target)으로출력해야힘
 	struct arp_header* arp = (struct arp_header*)(pkt_data + 14);
+
 	unsigned short opcode = ntohs(arp->opcode);
 
-	if (opcode == 0x0001) {  // request = 1
+	if (opcode == 0x0001) {
 		printf(" ******* request ******* \n");
-		printf(" Sender IP : %s\n ", inet_ntoa(arp->sender_ip));  // 바이트 순서의 32비트 값을 주소값으로 변환하기 위함(in_addr 필요)
+		printf(" Sender IP : %s\n ", inet_ntoa(arp->sender_ip));
 		printf("Target IP : %s\n ", inet_ntoa(arp->target_ip));
 		printf("\n");
 	}
 
-	if (opcode == 0x0002) {  // reply = 2
+	if (opcode == 0x0002) {
 		printf(" ********  reply  ******** \n");
 		printf(" Sender IP  : %s\n ", inet_ntoa(arp->sender_ip));
-
 		printf("Sender MAC : ");
 		for (int i = 0; i <= 5; i++)
 			printf("%02x:", arp->sender_mac[i]);
 		printf("\n");
 
 		printf("\nTarget IP  : %s\n ", inet_ntoa(arp->target_ip));
-
 		printf("\nDst MAC : ");
 		for (int i = 0; i <= 5; i++)
 			printf("%02x:", arp->target_mac[i]);
-
 		printf("\n\n");
 	}
 }
@@ -170,7 +165,6 @@ void analyze_ipv4_packet(const u_char* pkt_data, struct pcap_pkthdr* header, str
 	printf("\n--------------------------------------------------------------------\n\n");
 
 	printf("\n====== IPv4 packet ======\n");
-
 	printf("IPv4 패킷 길이: %d\n", header->len);
 
 	struct ip_header* ip = (struct ip_header*)(pkt_data + 14);
@@ -180,6 +174,7 @@ void analyze_ipv4_packet(const u_char* pkt_data, struct pcap_pkthdr* header, str
 
 	printf("출발지 MAC주소: "MAC_ADDR_FMT"\n", MAC_ADDR_FMT_ARGS(eth->src));
 	printf("목적지 MAC주소: "MAC_ADDR_FMT"\n", MAC_ADDR_FMT_ARGS(eth->dest));
+
 	printf("프로토콜: %d\n\n", ip->protocol);
 }
 
@@ -188,7 +183,6 @@ const char* choose_device(pcap_if_t* alldevs, pcap_if_t* d, pcap_t* handle, char
 	printf("\n****************************************************************************\n\n");
 
 	if (pcap_findalldevs(&alldevs, errbuf) == -1)
-
 		printf("장치 검색 실패: %s\n", errbuf);
 
 	int i = 0;
@@ -227,6 +221,7 @@ void print_hex_ascii(const u_char* payload, int len)
 	const u_char* ch = payload;
 	int cnt = 0;
 	int j = 0;
+
 	printf("data >> \n");
 
 	for (int i = 0; offset < len; offset += 16)
@@ -252,6 +247,7 @@ void print_hex_ascii(const u_char* payload, int len)
 		}
 
 		printf("\n");
+
 		if (cnt == 64)
 			break;
 	}
